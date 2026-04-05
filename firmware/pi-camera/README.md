@@ -61,6 +61,8 @@ The installer places the active configuration at:
 
 The shipped defaults are conservative and should work for a single-camera Pi Zero 2 W setup.
 
+The service waits for a host connection to appear on the Pi Zero 2 W `USB` data port before binding the gadget. By default it waits up to 60 seconds after start.
+
 ## Boot Configuration
 
 The installer updates the Pi boot files so gadget mode is available at boot:

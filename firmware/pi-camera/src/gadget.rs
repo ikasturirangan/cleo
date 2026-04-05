@@ -4,6 +4,8 @@ use std::fs;
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 
 struct FrameSpec {
     width: u16,
@@ -81,8 +83,12 @@ pub fn preflight(settings: &Settings) -> Result<(), String> {
         ));
     }
 
-    let udc = select_udc(settings)?;
-    logging::info(format!("Found USB device controller: {udc}"));
+    match select_udc_once(settings)? {
+        Some(udc) => logging::info(format!("Found USB device controller: {udc}")),
+        None => logging::warn(
+            "No USB device controller is visible yet; the runtime will wait for the host connection",
+        ),
+    }
 
     let camera_output = run_command_capture("rpicam-hello", &["--list-cameras"])?;
     logging::info("Camera inventory:");
@@ -96,7 +102,7 @@ pub fn setup(settings: &Settings) -> Result<String, String> {
     run_command("modprobe", &["libcomposite"])?;
     cleanup(settings)?;
 
-    let udc_name = select_udc(settings)?;
+    let udc_name = wait_for_udc(settings)?;
     let gadget_dir = settings.gadget_dir();
     let strings_dir = gadget_dir.join("strings/0x409");
     let config_dir = settings.config_dir();
@@ -216,7 +222,26 @@ fn ensure_root() -> Result<(), String> {
     Ok(())
 }
 
-fn select_udc(settings: &Settings) -> Result<String, String> {
+fn wait_for_udc(settings: &Settings) -> Result<String, String> {
+    let deadline = Instant::now() + settings.udc_wait_timeout;
+
+    loop {
+        if let Some(name) = select_udc_once(settings)? {
+            return Ok(name);
+        }
+
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "no USB device controller found under /sys/class/udc after waiting {} seconds; connect the USB host to the Pi Zero 2 W data port",
+                settings.udc_wait_timeout.as_secs()
+            ));
+        }
+
+        thread::sleep(Duration::from_secs(1));
+    }
+}
+
+fn select_udc_once(settings: &Settings) -> Result<Option<String>, String> {
     let udc_root = Path::new("/sys/class/udc");
     let entries = fs::read_dir(udc_root).map_err(io_error("read /sys/class/udc"))?;
 
@@ -231,14 +256,14 @@ fn select_udc(settings: &Settings) -> Result<String, String> {
     }
 
     if names.is_empty() {
-        return Err("no USB device controller found under /sys/class/udc".to_string());
+        return Ok(None);
     }
 
     names.sort();
 
     if let Some(preferred) = &settings.preferred_udc {
         if names.iter().any(|name| name == preferred) {
-            return Ok(preferred.clone());
+            return Ok(Some(preferred.clone()));
         }
         return Err(format!(
             "preferred UDC '{preferred}' was not found, available controllers: {}",
@@ -246,7 +271,7 @@ fn select_udc(settings: &Settings) -> Result<String, String> {
         ));
     }
 
-    Ok(names.remove(0))
+    Ok(Some(names.remove(0)))
 }
 
 fn run_command(program: &str, args: &[&str]) -> Result<(), String> {

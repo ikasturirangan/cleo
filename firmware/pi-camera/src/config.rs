@@ -1,6 +1,7 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct Settings {
@@ -16,6 +17,7 @@ pub struct Settings {
     pub camera_id: String,
     pub uvc_gadget_bin: PathBuf,
     pub preferred_udc: Option<String>,
+    pub udc_wait_timeout: Duration,
 }
 
 impl Settings {
@@ -50,6 +52,10 @@ impl Settings {
                 "/usr/local/bin/uvc-gadget",
             )),
             preferred_udc: optional_env("SLITCAM_UDC_NAME"),
+            udc_wait_timeout: Duration::from_secs(parse_u64(
+                &env_or_default("SLITCAM_UDC_WAIT_SECS", "60"),
+                "SLITCAM_UDC_WAIT_SECS",
+            )?),
         };
 
         settings.validate()?;
@@ -80,6 +86,9 @@ impl Settings {
         }
         if self.camera_id.trim().is_empty() {
             return Err("SLITCAM_CAMERA_ID must not be empty".to_string());
+        }
+        if self.udc_wait_timeout.is_zero() {
+            return Err("SLITCAM_UDC_WAIT_SECS must be greater than zero".to_string());
         }
         Ok(())
     }
@@ -127,6 +136,7 @@ impl Settings {
                 "SLITCAM_USB_MAX_POWER_MA={max_power}\n",
                 "SLITCAM_CAMERA_ID={camera_id}\n",
                 "SLITCAM_UVC_GADGET_BIN={uvc_bin}\n",
+                "SLITCAM_UDC_WAIT_SECS={udc_wait_secs}\n",
                 "# Optional: pin a specific UDC name if your platform exposes more than one\n",
                 "# SLITCAM_UDC_NAME=20980000.usb\n"
             ),
@@ -141,6 +151,7 @@ impl Settings {
             max_power = self.max_power_ma,
             camera_id = self.camera_id,
             uvc_bin = self.uvc_gadget_bin.display(),
+            udc_wait_secs = self.udc_wait_timeout.as_secs(),
         )
     }
 }
@@ -187,9 +198,16 @@ fn parse_u16(value: &str, key: &str) -> Result<u16, String> {
     }
 }
 
+fn parse_u64(value: &str, key: &str) -> Result<u64, String> {
+    value
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| format!("{key} must be a valid integer"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::parse_u16;
+    use super::{parse_u16, parse_u64};
 
     #[test]
     fn parses_hex_values() {
@@ -200,5 +218,10 @@ mod tests {
     #[test]
     fn parses_decimal_values() {
         assert_eq!(parse_u16("500", "X").unwrap(), 500);
+    }
+
+    #[test]
+    fn parses_u64_values() {
+        assert_eq!(parse_u64("60", "X").unwrap(), 60);
     }
 }
