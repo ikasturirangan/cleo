@@ -8,6 +8,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 BOOT_CONFIG=""
+BOOT_CMDLINE=""
 SERVICE_NAME="slitcam-pi-camera.service"
 INSTALL_BIN="/usr/local/bin/slitcam-pi-camera"
 ENV_DIR="/etc/slitcam"
@@ -30,6 +31,17 @@ detect_boot_config() {
   fi
 }
 
+detect_boot_cmdline() {
+  if [[ -f /boot/firmware/cmdline.txt ]]; then
+    BOOT_CMDLINE="/boot/firmware/cmdline.txt"
+  elif [[ -f /boot/cmdline.txt ]]; then
+    BOOT_CMDLINE="/boot/cmdline.txt"
+  else
+    echo "Unable to locate Raspberry Pi boot cmdline.txt" >&2
+    exit 1
+  fi
+}
+
 ensure_packages() {
   log "Installing OS packages"
   apt update
@@ -48,17 +60,35 @@ ensure_packages() {
 
 ensure_otg_overlay() {
   detect_boot_config
-  log "Ensuring OTG USB mode is enabled in ${BOOT_CONFIG}"
+  log "Ensuring USB peripheral gadget mode is enabled in ${BOOT_CONFIG}"
 
-  if grep -Eq '^[[:space:]]*dtoverlay=dwc2,dr_mode=otg([[:space:]]*)$' "$BOOT_CONFIG"; then
+  if grep -Eq '^[[:space:]]*dtoverlay=dwc2,dr_mode=peripheral([[:space:]]*)$' "$BOOT_CONFIG"; then
     return
   fi
 
-  if grep -Eq '^[[:space:]]*dtoverlay=dwc2([,[:space:]].*)?$' "$BOOT_CONFIG"; then
-    sed -i -E 's/^[[:space:]]*dtoverlay=dwc2([,[:space:]].*)?$/dtoverlay=dwc2,dr_mode=otg/' "$BOOT_CONFIG"
-  else
-    printf '\n# SlitCam USB webcam OTG mode\ndtoverlay=dwc2,dr_mode=otg\n' >> "$BOOT_CONFIG"
+  # Append a final [all] block so the gadget overlay applies to Pi Zero 2 W
+  # regardless of earlier model-specific sections in the stock config.
+  printf '\n# SlitCam USB webcam gadget mode\n[all]\ndtoverlay=dwc2,dr_mode=peripheral\n' >> "$BOOT_CONFIG"
+}
+
+ensure_cmdline_loads_dwc2() {
+  detect_boot_cmdline
+  log "Ensuring dwc2 loads at boot via ${BOOT_CMDLINE}"
+
+  local cmdline
+  cmdline="$(tr -s ' ' < "${BOOT_CMDLINE}" | sed 's/^ //; s/ $//')"
+
+  if grep -Eq '(^| )modules-load=([^ ]*,)?dwc2(,[^ ]*)?( |$)' "${BOOT_CMDLINE}"; then
+    return
   fi
+
+  if grep -Eq '(^| )modules-load=' "${BOOT_CMDLINE}"; then
+    cmdline="$(printf '%s' "${cmdline}" | sed -E 's/(^| )modules-load=([^ ]*)/\1modules-load=\2,dwc2/')"
+  else
+    cmdline="${cmdline} modules-load=dwc2"
+  fi
+
+  printf '%s\n' "${cmdline}" > "${BOOT_CMDLINE}"
 }
 
 disable_conflicting_gadget_mode() {
@@ -134,6 +164,7 @@ main() {
   ensure_packages
   verify_camera
   ensure_otg_overlay
+  ensure_cmdline_loads_dwc2
   disable_conflicting_gadget_mode
   build_uvc_gadget
   build_firmware

@@ -61,6 +61,15 @@ The installer places the active configuration at:
 
 The shipped defaults are conservative and should work for a single-camera Pi Zero 2 W setup.
 
+## Boot Configuration
+
+The installer updates the Pi boot files so gadget mode is available at boot:
+
+- `dtoverlay=dwc2,dr_mode=peripheral` in `config.txt`
+- `modules-load=dwc2` in `cmdline.txt`
+
+If the service logs `no USB device controller found under /sys/class/udc`, the boot configuration is the first thing to check.
+
 ## Service Logs
 
 ```bash

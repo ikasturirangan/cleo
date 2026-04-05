@@ -35,3 +35,4 @@ The Pi Zero 2 W acts as a camera appliance:
 
 - The Pi-side firmware is implemented in Rust for the control/runtime layer, with shell scripts only for installation and OS integration.
 - The actual UVC video transport still relies on `uvc-gadget`, which is currently the practical userspace bridge for Raspberry Pi camera to USB UVC gadget mode.
+- The installer forces `dtoverlay=dwc2,dr_mode=peripheral` and adds `modules-load=dwc2` to the Pi boot command line so `/sys/class/udc` is present on Pi Zero 2 W.
