@@ -1,0 +1,28 @@
+[Unit]
+Description=SlitCam BeagleBone Controller
+After=local-fs.target systemd-modules-load.service network.target
+Wants=systemd-modules-load.service
+ConditionPathExists=/usr/local/bin/slitcam-bbb-controller
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-/etc/slitcam/bbb-controller.env
+ExecStartPre=/usr/local/bin/slitcam-bbb-controller preflight
+ExecStart=/usr/local/bin/slitcam-bbb-controller run
+Restart=on-failure
+RestartSec=2
+RestartPreventExitStatus=0
+KillMode=control-group
+TimeoutStartSec=120
+TimeoutStopSec=15
+User=root
+Group=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=/dev /sys /etc/slitcam /tmp /run
+
+[Install]
+WantedBy=multi-user.target
