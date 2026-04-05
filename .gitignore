@@ -1,0 +1,6 @@
+.DS_Store
+target/
+**/target/
+webapp/node_modules/
+webapp/.next/
+webapp/dist/

@@ -1,0 +1,30 @@
+[Unit]
+Description=SlitCam Pi Camera UVC Gadget Service
+After=local-fs.target systemd-modules-load.service
+Wants=systemd-modules-load.service
+ConditionPathExists=/usr/local/bin/slitcam-pi-camera
+ConditionPathExists=/usr/local/bin/uvc-gadget
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-/etc/slitcam/pi-camera.env
+ExecStartPre=/usr/local/bin/slitcam-pi-camera preflight
+ExecStart=/usr/local/bin/slitcam-pi-camera run
+ExecStopPost=/usr/local/bin/slitcam-pi-camera cleanup
+Restart=on-failure
+RestartSec=2
+RestartPreventExitStatus=0
+KillMode=control-group
+TimeoutStartSec=30
+TimeoutStopSec=15
+User=root
+Group=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=/sys/kernel/config /sys/class/udc /tmp /run
+
+[Install]
+WantedBy=multi-user.target
