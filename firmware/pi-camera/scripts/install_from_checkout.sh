@@ -95,6 +95,13 @@ ensure_otg_overlay() {
     return
   fi
 
+  # Remove any bare dtoverlay=dwc2 line so we don't load dwc2 twice with
+  # conflicting mode parameters (OTG default vs. peripheral).
+  if grep -Eq '^[[:space:]]*dtoverlay=dwc2([[:space:]]*)$' "$BOOT_CONFIG"; then
+    sed -i -E '/^[[:space:]]*dtoverlay=dwc2[[:space:]]*$/d' "$BOOT_CONFIG"
+    log "Removed bare dtoverlay=dwc2 to avoid conflicting overlay"
+  fi
+
   # Append a final [all] block so the gadget overlay applies to Pi Zero 2 W
   # regardless of earlier model-specific sections in the stock config.
   printf '\n# SlitCam USB webcam gadget mode\n[all]\ndtoverlay=dwc2,dr_mode=peripheral\n' >> "$BOOT_CONFIG"
