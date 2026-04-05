@@ -15,6 +15,11 @@ ENV_DIR="/etc/slitcam"
 ENV_FILE="${ENV_DIR}/pi-camera.env"
 ENV_DEFAULT="${ENV_DIR}/pi-camera.env.default"
 UVC_REPO_DIR="/usr/local/src/uvc-gadget"
+PREBUILT_BIN_DEFAULT="${PROJECT_DIR}/prebuilt/linux-aarch64/slitcam-pi-camera"
+FIRMWARE_SOURCE_BIN=""
+BUILD_FROM_SOURCE=1
+CARGO_BUILD_PROFILE="${SLITCAM_CARGO_BUILD_PROFILE:-pi-release}"
+CARGO_BUILD_JOBS="${SLITCAM_CARGO_BUILD_JOBS:-1}"
 
 log() {
   printf '\n[%s] %s\n' "$(date '+%H:%M:%S')" "$1"
@@ -42,20 +47,44 @@ detect_boot_cmdline() {
   fi
 }
 
+select_firmware_source() {
+  if [[ -n "${SLITCAM_PREBUILT_BIN:-}" ]]; then
+    if [[ ! -f "${SLITCAM_PREBUILT_BIN}" ]]; then
+      echo "Configured prebuilt binary does not exist: ${SLITCAM_PREBUILT_BIN}" >&2
+      exit 1
+    fi
+
+    FIRMWARE_SOURCE_BIN="${SLITCAM_PREBUILT_BIN}"
+    BUILD_FROM_SOURCE=0
+    return
+  fi
+
+  if [[ -f "${PREBUILT_BIN_DEFAULT}" ]]; then
+    FIRMWARE_SOURCE_BIN="${PREBUILT_BIN_DEFAULT}"
+    BUILD_FROM_SOURCE=0
+    return
+  fi
+
+  FIRMWARE_SOURCE_BIN="${PROJECT_DIR}/target/${CARGO_BUILD_PROFILE}/slitcam-pi-camera"
+  BUILD_FROM_SOURCE=1
+}
+
 ensure_packages() {
   log "Installing OS packages"
   apt update
   apt install -y \
     build-essential \
     ca-certificates \
-    cargo \
     git \
     libcamera-dev \
     libjpeg-dev \
     meson \
     ninja-build \
-    pkg-config \
-    rustc
+    pkg-config
+
+  if [[ "${BUILD_FROM_SOURCE}" -eq 1 ]]; then
+    apt install -y cargo rustc
+  fi
 }
 
 ensure_otg_overlay() {
@@ -134,14 +163,20 @@ verify_camera() {
 }
 
 build_firmware() {
-  log "Building Rust firmware"
-  cargo build --release --manifest-path "${PROJECT_DIR}/Cargo.toml"
+  if [[ "${BUILD_FROM_SOURCE}" -eq 0 ]]; then
+    log "Using prebuilt firmware binary at ${FIRMWARE_SOURCE_BIN}"
+    return
+  fi
+
+  log "Building Rust firmware with profile ${CARGO_BUILD_PROFILE} and ${CARGO_BUILD_JOBS} job(s)"
+  CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS}" \
+    cargo build --profile "${CARGO_BUILD_PROFILE}" --manifest-path "${PROJECT_DIR}/Cargo.toml"
 }
 
 install_assets() {
   log "Installing binary and service assets"
   install -d /usr/local/bin
-  install -m 0755 "${PROJECT_DIR}/target/release/slitcam-pi-camera" "${INSTALL_BIN}"
+  install -m 0755 "${FIRMWARE_SOURCE_BIN}" "${INSTALL_BIN}"
 
   install -d "${ENV_DIR}"
   install -m 0644 "${PROJECT_DIR}/deploy/pi-camera.env" "${ENV_DEFAULT}"
@@ -161,6 +196,7 @@ enable_service() {
 }
 
 main() {
+  select_firmware_source
   ensure_packages
   verify_camera
   ensure_otg_overlay

@@ -15,6 +15,7 @@ Production-oriented Raspberry Pi Zero 2 W firmware for the slit lamp camera modu
 - `src/`: Rust runtime
 - `deploy/pi-camera.env`: default environment configuration
 - `deploy/slitcam-pi-camera.service`: `systemd` unit
+- `prebuilt/`: optional drop-in location for a precompiled Linux ARM64 binary
 - `scripts/install_from_checkout.sh`: build and install on a Raspberry Pi
 
 ## Build and Install on Pi
@@ -25,6 +26,8 @@ From a sparse checkout or full checkout:
 cd firmware/pi-camera
 sudo ./scripts/install_from_checkout.sh
 ```
+
+On Pi Zero 2 W, the installer uses a low-memory Cargo profile by default when it has to compile from source. If you provide a prebuilt Linux ARM64 binary in `prebuilt/linux-aarch64/slitcam-pi-camera`, the Pi skips the Rust build entirely.
 
 Then reboot:
 
