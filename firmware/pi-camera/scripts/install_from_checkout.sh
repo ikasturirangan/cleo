@@ -185,6 +185,11 @@ install_assets() {
   install -d /usr/local/bin
   install -m 0755 "${FIRMWARE_SOURCE_BIN}" "${INSTALL_BIN}"
 
+  # Shell-based gadget script (alternative / diagnostic service).
+  install -m 0755 \
+    "${PROJECT_DIR}/scripts/rpi-uvc-gadget.sh" \
+    "/usr/local/bin/rpi-uvc-gadget.sh"
+
   install -d "${ENV_DIR}"
   install -m 0644 "${PROJECT_DIR}/deploy/pi-camera.env" "${ENV_DEFAULT}"
   if [[ ! -f "${ENV_FILE}" ]]; then
@@ -194,6 +199,10 @@ install_assets() {
   install -m 0644 \
     "${PROJECT_DIR}/deploy/slitcam-pi-camera.service" \
     "/etc/systemd/system/${SERVICE_NAME}"
+
+  install -m 0644 \
+    "${PROJECT_DIR}/deploy/uvc-gadget.service" \
+    "/etc/systemd/system/uvc-gadget.service"
 }
 
 enable_service() {

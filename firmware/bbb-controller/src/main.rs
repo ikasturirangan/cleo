@@ -13,7 +13,6 @@ use slitcam_shared::DeviceState;
 use std::env;
 use std::process::ExitCode;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 fn main() -> ExitCode {
     let command = match env::args().nth(1) {
@@ -60,7 +59,6 @@ fn main() -> ExitCode {
 fn preflight(settings: &Settings) -> Result<(), String> {
     logging::info("Running preflight checks");
 
-    // I2C bus accessible?
     if !settings.i2c_bus.exists() {
         return Err(format!(
             "I2C bus {} does not exist; check BeagleBone cape/overlay config",
@@ -68,7 +66,6 @@ fn preflight(settings: &Settings) -> Result<(), String> {
         ));
     }
 
-    // UART device accessible?
     if !settings.uart_device.exists() {
         return Err(format!(
             "UART device {} does not exist; check BeagleBone cape/overlay config",
@@ -76,7 +73,6 @@ fn preflight(settings: &Settings) -> Result<(), String> {
         ));
     }
 
-    // Look for the Pi camera (non-fatal at preflight — it may not be connected yet).
     match Camera::find(settings)? {
         Some(path) => logging::info(format!("Pi camera found at {}", path.display())),
         None => logging::warn(
@@ -95,35 +91,53 @@ fn run(settings: &Settings) -> Result<(), String> {
     let state: Arc<Mutex<DeviceState>> = Arc::new(Mutex::new(DeviceState::default()));
 
     // ── camera ────────────────────────────────────────────────────────────────
-    let camera_path = Camera::wait_for_device(settings)?;
+    // Honour an explicit SLITCAM_VIDEO_DEVICE override before falling back to
+    // USB discovery.  This lets operators pin /dev/videoN on systems where
+    // device numbering is unstable.
+    let camera_path = if env::var_os("SLITCAM_VIDEO_DEVICE").is_some()
+        && settings.video_device.exists()
+    {
+        logging::info(format!(
+            "Using pinned camera device {}",
+            settings.video_device.display()
+        ));
+        settings.video_device.clone()
+    } else {
+        Camera::wait_for_device(settings)?
+    };
+
     let camera = Camera::open(camera_path.clone())?;
+
+    // Record that the device node is present and opened; capture_width/height
+    // remain 0 until start_capture() negotiates the format with the driver.
     {
         let mut s = state.lock().unwrap();
         s.camera.connected = true;
         s.camera.device_path = camera_path.to_string_lossy().into_owned();
-        s.camera.capture_width = 1280;
-        s.camera.capture_height = 720;
     }
 
     camera.start_capture()?;
 
     // ── DLP2000 ───────────────────────────────────────────────────────────────
-    let mut dlp = Dlp::open(settings)?;
-    dlp.init()?;
-    {
-        state.lock().unwrap().dlp_ready = true;
-    }
+    let dlp = Arc::new(Mutex::new(Dlp::open(settings)?));
+    dlp.lock().unwrap().init()?;
+    // dlp_ready stays false until init() exchanges real I2C traffic with the
+    // DLPC2607 and confirms the device ID.
 
     // ── TMC2209 ───────────────────────────────────────────────────────────────
-    let mut motion = Motion::open(settings)?;
-    motion.init()?;
+    let motion = Arc::new(Mutex::new(Motion::open(settings)?));
+    motion.lock().unwrap().init()?;
 
     // ── API server ────────────────────────────────────────────────────────────
+    // The API thread owns shared handles so it can drive hardware directly and
+    // then read back authoritative state (e.g. position_steps from Motion).
     {
         let api_state = Arc::clone(&state);
+        let api_motion = Arc::clone(&motion);
+        let api_dlp = Arc::clone(&dlp);
         let api_settings = settings.clone();
         std::thread::spawn(move || {
-            if let Err(e) = api::serve(&api_settings, api_state) {
+            if let Err(e) = api::serve(&api_settings, api_state, api_motion, api_dlp) {
                 logging::error(format!("API server exited: {e}"));
             }
         });
@@ -134,18 +148,10 @@ fn run(settings: &Settings) -> Result<(), String> {
         settings.api_bind
     ));
 
-    // ── main loop ─────────────────────────────────────────────────────────────
-    // Keep the service alive and mirror hardware state into the shared snapshot.
-    // Long-term: replace with an async event loop or select! over device fds.
+    // Keep the service alive.  Hardware state is updated by the API thread
+    // after each command; there is no background sync loop to clobber it.
     loop {
-        {
-            let mut s = state.lock().unwrap();
-            s.motion.position_steps = motion.position_steps;
-            s.motion.homed = motion.homed;
-        }
-        // Silence unused-variable warnings for hardware handles kept alive here.
-        let _ = &dlp;
-        std::thread::sleep(Duration::from_millis(100));
+        std::thread::sleep(std::time::Duration::from_secs(60));
     }
 }
 

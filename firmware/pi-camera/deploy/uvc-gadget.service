@@ -1,0 +1,29 @@
+[Unit]
+Description=SlitCam UVC Webcam Gadget
+# configfs must be mounted before the script can write gadget descriptors.
+After=sys-kernel-config.mount systemd-modules-load.service
+Requires=sys-kernel-config.mount
+# Stop this service if the Rust-based service is also present, to avoid two
+# processes both trying to own /sys/kernel/config/usb_gadget/slitcam0.
+Conflicts=slitcam-pi-camera.service
+ConditionPathExists=/usr/local/bin/rpi-uvc-gadget.sh
+ConditionPathExists=/usr/local/bin/uvc-gadget
+
+[Service]
+# Type=simple: systemd tracks the uvc-gadget process that the script execs
+# into.  The service is considered active as long as uvc-gadget is running,
+# and systemd restarts it automatically if the process exits unexpectedly.
+Type=simple
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-/etc/slitcam/pi-camera.env
+ExecStart=/usr/local/bin/rpi-uvc-gadget.sh
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStartSec=90
+TimeoutStopSec=15
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

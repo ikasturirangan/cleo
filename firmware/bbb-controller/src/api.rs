@@ -5,7 +5,9 @@ use std::sync::{Arc, Mutex};
 use slitcam_shared::{CommandResponse, ControlCommand, DeviceState};
 
 use crate::config::Settings;
+use crate::dlp::Dlp;
 use crate::logging;
+use crate::motion::Motion;
 
 /// Start the HTTP API server.  Blocks until the listener fails.
 ///
@@ -15,7 +17,12 @@ use crate::logging;
 /// - `GET  /health`  → `{"type":"ok"}`
 /// - `GET  /state`   → full `DeviceState` JSON
 /// - `POST /command` → accepts `ControlCommand` JSON, returns `CommandResponse` JSON
-pub fn serve(settings: &Settings, state: Arc<Mutex<DeviceState>>) -> Result<(), String> {
+pub fn serve(
+    settings: &Settings,
+    state: Arc<Mutex<DeviceState>>,
+    motion: Arc<Mutex<Motion>>,
+    dlp: Arc<Mutex<Dlp>>,
+) -> Result<(), String> {
     let listener = TcpListener::bind(&settings.api_bind)
         .map_err(|e| format!("bind {}: {e}", settings.api_bind))?;
     logging::info(format!("API listening on http://{}", settings.api_bind));
@@ -24,8 +31,10 @@ pub fn serve(settings: &Settings, state: Arc<Mutex<DeviceState>>) -> Result<(), 
         match stream {
             Ok(stream) => {
                 let state = Arc::clone(&state);
+                let motion = Arc::clone(&motion);
+                let dlp = Arc::clone(&dlp);
                 std::thread::spawn(move || {
-                    if let Err(e) = handle_connection(stream, state) {
+                    if let Err(e) = handle_connection(stream, state, motion, dlp) {
                         logging::warn(format!("API connection error: {e}"));
                     }
                 });
@@ -42,6 +51,8 @@ pub fn serve(settings: &Settings, state: Arc<Mutex<DeviceState>>) -> Result<(), 
 fn handle_connection(
     stream: TcpStream,
     state: Arc<Mutex<DeviceState>>,
+    motion: Arc<Mutex<Motion>>,
+    dlp: Arc<Mutex<Dlp>>,
 ) -> Result<(), String> {
     let mut reader = BufReader::new(
         stream
@@ -86,10 +97,8 @@ fn handle_connection(
             .map_err(|e| format!("read body: {e}"))?;
     }
 
-    // Route
-    let (status, body_json) = route(&method, &path, &body, state);
+    let (status, body_json) = route(&method, &path, &body, state, motion, dlp);
 
-    // Write response — get a mutable handle to the original stream
     let mut stream = reader.into_inner();
     let response = format!(
         "HTTP/1.1 {status}\r\n\
@@ -114,6 +123,8 @@ fn route(
     path: &str,
     body: &[u8],
     state: Arc<Mutex<DeviceState>>,
+    motion: Arc<Mutex<Motion>>,
+    dlp: Arc<Mutex<Dlp>>,
 ) -> (&'static str, String) {
     match (method, path) {
         ("GET", "/health") => (
@@ -131,7 +142,7 @@ fn route(
 
         ("POST", "/command") => match serde_json::from_slice::<ControlCommand>(body) {
             Ok(cmd) => {
-                let response = execute_command(cmd, &state);
+                let response = execute_command(cmd, &state, &motion, &dlp);
                 match serde_json::to_string(&response) {
                     Ok(json) => ("200 OK", json),
                     Err(e) => ("500 Internal Server Error", err_json(e)),
@@ -159,40 +170,46 @@ fn route(
 fn execute_command(
     cmd: ControlCommand,
     state: &Arc<Mutex<DeviceState>>,
+    motion: &Arc<Mutex<Motion>>,
+    dlp: &Arc<Mutex<Dlp>>,
 ) -> CommandResponse {
     match cmd {
         ControlCommand::Ping => CommandResponse::Ok,
 
-        ControlCommand::GetState => {
-            CommandResponse::State(state.lock().unwrap().clone())
-        }
+        ControlCommand::GetState => CommandResponse::State(state.lock().unwrap().clone()),
 
         ControlCommand::SetSlit(config) => {
-            // TODO: forward to Dlp::set_slit via a command channel.
+            // Drive hardware first; only update state on success.
+            if let Err(e) = dlp.lock().unwrap().set_slit(&config) {
+                return CommandResponse::error(e);
+            }
             state.lock().unwrap().slit = config;
             CommandResponse::Ok
         }
 
         ControlCommand::MoveFocus { steps } => {
-            // TODO: forward to Motion::move_steps via a command channel.
-            let mut s = state.lock().unwrap();
-            if !s.motion.homed {
-                return CommandResponse::error("motor not homed");
+            // Drive hardware; read back the authoritative position from Motion.
+            let mut m = motion.lock().unwrap();
+            if let Err(e) = m.move_steps(steps) {
+                return CommandResponse::error(e);
             }
-            s.motion.position_steps += steps;
+            state.lock().unwrap().motion.position_steps = m.position_steps;
             CommandResponse::Ok
         }
 
         ControlCommand::HomeFocus => {
-            // TODO: forward to Motion::home via a command channel.
+            let mut m = motion.lock().unwrap();
+            if let Err(e) = m.home() {
+                return CommandResponse::error(e);
+            }
             let mut s = state.lock().unwrap();
-            s.motion.position_steps = 0;
-            s.motion.homed = true;
+            s.motion.position_steps = m.position_steps;
+            s.motion.homed = m.homed;
             CommandResponse::Ok
         }
 
         ControlCommand::SetCaptureFormat { width, height } => {
-            // TODO: forward to Camera via a command channel.
+            // TODO: forward to Camera via a command channel once capture is implemented.
             let mut s = state.lock().unwrap();
             s.camera.capture_width = width;
             s.camera.capture_height = height;
