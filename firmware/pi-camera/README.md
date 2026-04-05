@@ -29,6 +29,17 @@ sudo ./scripts/install_from_checkout.sh
 
 On Pi Zero 2 W, the installer uses a low-memory Cargo profile by default when it has to compile from source. If you provide a prebuilt Linux ARM64 binary in `prebuilt/linux-aarch64/slitcam-pi-camera`, the Pi skips the Rust build entirely.
 
+## Build Prebuilt Binary on Mac
+
+From this repository on the Mac:
+
+```bash
+cd firmware/pi-camera
+./scripts/build_prebuilt_linux_aarch64.sh
+```
+
+That produces a static Linux ARM64 binary at `prebuilt/linux-aarch64/slitcam-pi-camera`. Commit and push that file, then the Pi installer will use it automatically.
+
 Then reboot:
 
 ```bash

@@ -6,7 +6,19 @@ If you do not want to compile Rust on the Raspberry Pi Zero 2 W, place a prebuil
 prebuilt/linux-aarch64/slitcam-pi-camera
 ```
 
+From this Mac checkout, regenerate that binary with:
+
+```bash
+./scripts/build_prebuilt_linux_aarch64.sh
+```
+
 The installer will detect that file automatically and install it instead of running `cargo build` on the Pi.
+
+You can optionally commit a checksum alongside it:
+
+```text
+prebuilt/linux-aarch64/slitcam-pi-camera.sha256
+```
 
 You can also override the path explicitly:
 
