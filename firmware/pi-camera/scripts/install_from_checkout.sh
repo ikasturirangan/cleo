@@ -95,11 +95,11 @@ ensure_otg_overlay() {
     return
   fi
 
-  # Remove any bare dtoverlay=dwc2 line so we don't load dwc2 twice with
-  # conflicting mode parameters (OTG default vs. peripheral).
-  if grep -Eq '^[[:space:]]*dtoverlay=dwc2([[:space:]]*)$' "$BOOT_CONFIG"; then
-    sed -i -E '/^[[:space:]]*dtoverlay=dwc2[[:space:]]*$/d' "$BOOT_CONFIG"
-    log "Removed bare dtoverlay=dwc2 to avoid conflicting overlay"
+  # Remove any existing dwc2 overlay line (bare, host, or OTG mode) so we
+  # don't load dwc2 twice with conflicting parameters.
+  if grep -Eq '^[[:space:]]*dtoverlay=dwc2' "$BOOT_CONFIG"; then
+    sed -i -E '/^[[:space:]]*dtoverlay=dwc2/d' "$BOOT_CONFIG"
+    log "Removed existing dtoverlay=dwc2 line(s) to avoid conflicting overlay"
   fi
 
   # Append a final [all] block so the gadget overlay applies to Pi Zero 2 W
