@@ -241,13 +241,6 @@ impl Motion {
             .write_all(&send)
             .map_err(|e| format!("UART read-req reg 0x{reg:02x}: {e}"))?;
 
-        // On single-wire UART the Pi will echo back its own TX bytes first;
-        // drain the 5-byte echo before reading the 8-byte reply.
-        let mut echo = [0u8; 5];
-        self.file
-            .read_exact(&mut echo)
-            .map_err(|e| format!("UART echo drain reg 0x{reg:02x}: {e}"))?;
-
         // Read 8-byte reply frame
         let mut reply = [0u8; 8];
         self.file
