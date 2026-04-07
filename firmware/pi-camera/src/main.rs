@@ -1,10 +1,13 @@
 mod config;
 mod gadget;
 mod logging;
+mod motion;
 
 use crate::config::Settings;
+use crate::motion::Motion;
 use std::env;
 use std::process::{Command, ExitCode};
+use std::sync::{Arc, Mutex};
 
 fn main() -> ExitCode {
     let command = match env::args().nth(1) {
@@ -50,12 +53,46 @@ fn main() -> ExitCode {
 fn run(settings: &Settings) -> Result<(), String> {
     gadget::preflight(settings)?;
 
+    // ── TMC2209 ───────────────────────────────────────────────────────────────
+    // Open motion controller if the UART device is present; non-fatal if
+    // the motor is not connected so the camera still works standalone.
+    let motion: Option<Arc<Mutex<Motion>>> = if settings.uart_device.exists() {
+        match Motion::open(settings) {
+            Ok(mut m) => {
+                if let Err(e) = m.init() {
+                    logging::warn(format!("TMC2209 init failed: {e}"));
+                    None
+                } else {
+                    Some(Arc::new(Mutex::new(m)))
+                }
+            }
+            Err(e) => {
+                logging::warn(format!("TMC2209 open failed: {e}"));
+                None
+            }
+        }
+    } else {
+        logging::warn(format!(
+            "UART device {} not present — motor disabled",
+            settings.uart_device.display()
+        ));
+        None
+    };
+
     let udc_name = gadget::setup(settings)?;
     logging::info(format!("Configured USB gadget on UDC {udc_name}"));
+
+    // Pass motion handle into uvc-gadget via env so future control integration
+    // can forward commands; for now uvc-gadget runs in the foreground.
+    let _ = motion; // keep alive until uvc-gadget exits
 
     let status = Command::new(&settings.uvc_gadget_bin)
         .arg("-c")
         .arg(&settings.camera_id)
+        .arg("-r")
+        .arg(&settings.uvc_resolution)
+        .arg("-f")
+        .arg(settings.uvc_framerate.to_string())
         .arg(settings.uvc_function_name())
         .status()
         .map_err(|err| {

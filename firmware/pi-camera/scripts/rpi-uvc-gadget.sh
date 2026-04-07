@@ -23,6 +23,8 @@ MAX_POWER_MA="${SLITCAM_USB_MAX_POWER_MA:-500}"
 CAMERA_ID="${SLITCAM_CAMERA_ID:-0}"
 UVC_GADGET_BIN="${SLITCAM_UVC_GADGET_BIN:-/usr/local/bin/uvc-gadget}"
 UDC_WAIT_SECS="${SLITCAM_UDC_WAIT_SECS:-60}"
+UVC_RESOLUTION="${SLITCAM_UVC_RESOLUTION:-640x480}"
+UVC_FRAMERATE="${SLITCAM_UVC_FRAMERATE:-30}"
 
 CONFIGFS_ROOT="/sys/kernel/config"
 GADGET_DIR="${CONFIGFS_ROOT}/usb_gadget/${GADGET_NAME}"
@@ -181,4 +183,4 @@ log "Gadget bound; starting uvc-gadget (camera ${CAMERA_ID})"
 
 # Run uvc-gadget in the foreground.  systemd tracks this process; if it exits
 # the service restarts per Restart=on-failure.
-exec "${UVC_GADGET_BIN}" -c "${CAMERA_ID}" uvc.0
+exec "${UVC_GADGET_BIN}" -c "${CAMERA_ID}" -r "${UVC_RESOLUTION}" -f "${UVC_FRAMERATE}" uvc.0
