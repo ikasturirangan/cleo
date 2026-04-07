@@ -53,30 +53,17 @@ fn main() -> ExitCode {
 fn run(settings: &Settings) -> Result<(), String> {
     gadget::preflight(settings)?;
 
-    // ── TMC2209 ───────────────────────────────────────────────────────────────
-    // Open motion controller if the UART device is present; non-fatal if
-    // the motor is not connected so the camera still works standalone.
-    let motion: Option<Arc<Mutex<Motion>>> = if settings.uart_device.exists() {
-        match Motion::open(settings) {
-            Ok(mut m) => {
-                if let Err(e) = m.init() {
-                    logging::warn(format!("TMC2209 init failed: {e}"));
-                    None
-                } else {
-                    Some(Arc::new(Mutex::new(m)))
-                }
-            }
-            Err(e) => {
-                logging::warn(format!("TMC2209 open failed: {e}"));
-                None
-            }
+    // ── TMC2209 step/dir GPIO ─────────────────────────────────────────────────
+    // Non-fatal — camera still works if GPIO export fails (e.g. pins in use).
+    let motion: Option<Arc<Mutex<Motion>>> = match Motion::open(settings) {
+        Ok(m) => {
+            logging::info("TMC2209 step/dir GPIO ready");
+            Some(Arc::new(Mutex::new(m)))
         }
-    } else {
-        logging::warn(format!(
-            "UART device {} not present — motor disabled",
-            settings.uart_device.display()
-        ));
-        None
+        Err(e) => {
+            logging::warn(format!("TMC2209 GPIO open failed: {e} — motor disabled"));
+            None
+        }
     };
 
     let udc_name = gadget::setup(settings)?;
