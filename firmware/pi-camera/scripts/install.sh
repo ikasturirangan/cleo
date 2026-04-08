@@ -43,10 +43,11 @@ log "uvc-gadget installed at /usr/local/bin/uvc-gadget"
 # ── 4. Rust ───────────────────────────────────────────────────────────────────
 
 log "Installing Rust"
-if ! command -v cargo &>/dev/null; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --quiet
+if ! command -v rustup &>/dev/null; then
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 fi
 source "$HOME/.cargo/env"
+rustup default stable
 
 # ── 5. slitcam-pi-camera binary ───────────────────────────────────────────────
 
