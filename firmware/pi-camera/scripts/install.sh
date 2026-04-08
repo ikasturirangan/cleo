@@ -36,10 +36,20 @@ log "Building uvc-gadget"
 rm -rf /tmp/uvc-gadget
 git clone https://github.com/kbingham/uvc-gadget /tmp/uvc-gadget
 cd /tmp/uvc-gadget
+# Include aarch64 multiarch pkg-config path so meson finds libcamera-dev
+export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 meson setup build -Dwerror=false
+# Abort early if libcamera was not detected — camera will not work without it
+if ! grep -q '"libcamera"' build/meson-info/intro-dependencies.json 2>/dev/null; then
+    die "libcamera not detected in uvc-gadget build. Ensure libcamera-dev is installed and pkg-config can find it."
+fi
+log "libcamera detected — uvc-gadget will support Pi camera"
 ninja -C build -j$(nproc) 2>&1 | tail -5
 sudo cp build/src/uvc-gadget /usr/local/bin/
-sudo cp build/lib/libuvcgadget.so.0.1.0 /usr/local/lib/
+# Copy shared library if the build produced one
+if [ -f build/lib/libuvcgadget.so.0.1.0 ]; then
+    sudo cp build/lib/libuvcgadget.so.0.1.0 /usr/local/lib/
+fi
 sudo ldconfig
 log "uvc-gadget installed"
 
