@@ -33,9 +33,9 @@ sudo apt-get install -y \
 
 log "Building uvc-gadget"
 rm -rf /tmp/uvc-gadget
-git clone --quiet https://github.com/kbingham/uvc-gadget /tmp/uvc-gadget
+git clone https://github.com/kbingham/uvc-gadget /tmp/uvc-gadget
 cd /tmp/uvc-gadget
-meson setup build -Dwerror=false --quiet
+meson setup build -Dwerror=false
 ninja -C build -j$(nproc) 2>&1 | tail -5
 sudo cp build/src/uvc-gadget /usr/local/bin/
 log "uvc-gadget installed at /usr/local/bin/uvc-gadget"
@@ -58,7 +58,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 if [[ ! -f "${REPO_DIR}/Cargo.toml" ]]; then
     log "Cloning slitcam repo"
     rm -rf /tmp/slitcam
-    git clone --quiet https://github.com/ikasturirangan/cleo /tmp/slitcam
+    git clone https://github.com/ikasturirangan/cleo /tmp/slitcam
     REPO_DIR=/tmp/slitcam/firmware/pi-camera
 fi
 
