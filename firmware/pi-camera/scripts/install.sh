@@ -26,7 +26,7 @@ log "Installing dependencies"
 sudo apt-get update -qq
 sudo apt-get install -y \
     git cmake meson ninja-build \
-    libcamera-dev libudev-dev \
+    libcamera-dev libcamera-v4l2 libudev-dev \
     pkg-config build-essential \
     libjpeg-dev
 
@@ -45,16 +45,6 @@ if [ -f build/lib/libuvcgadget.so.0.1.0 ]; then
 fi
 sudo ldconfig
 log "uvc-gadget installed"
-
-# kbingham/uvc-gadget is V4L2-only; it uses libcamera through the libcamera
-# v4l2-compat shim (LD_PRELOAD) at runtime — verify the shim exists.
-V4L2_COMPAT=/usr/lib/aarch64-linux-gnu/libcamera/v4l2-compat.so
-if [ ! -f "${V4L2_COMPAT}" ]; then
-    log "v4l2-compat.so not found at ${V4L2_COMPAT} — installing libcamera-v4l2"
-    sudo apt-get install -y libcamera-v4l2 2>/dev/null || \
-        die "Cannot find libcamera v4l2-compat.so. Camera will not work."
-fi
-log "libcamera v4l2-compat.so present — camera will work via LD_PRELOAD"
 
 # ── 4. slitcam-pi-camera binary (pre-built) ───────────────────────────────────
 

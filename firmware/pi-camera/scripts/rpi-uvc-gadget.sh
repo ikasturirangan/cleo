@@ -274,10 +274,10 @@ fi
 
 # kbingham/uvc-gadget is V4L2-only; route camera through libcamera's v4l2-compat
 # shim so it can access the Pi camera (imx708) which only speaks libcamera.
-V4L2_COMPAT="/usr/lib/aarch64-linux-gnu/libcamera/v4l2-compat.so"
-[[ -f "${V4L2_COMPAT}" ]] \
-    || die "libcamera v4l2-compat.so not found at ${V4L2_COMPAT}; reinstall libcamera-dev"
+V4L2_COMPAT="$(find /usr/lib -name "v4l2-compat.so" 2>/dev/null | head -1)"
+[[ -n "${V4L2_COMPAT}" ]] \
+    || die "libcamera v4l2-compat.so not found; run: sudo apt-get install -y libcamera-v4l2"
 
-log "Starting uvc-gadget (camera /dev/video${CAMERA_ID} via libcamera v4l2-compat)"
+log "Starting uvc-gadget (camera /dev/video${CAMERA_ID} via ${V4L2_COMPAT})"
 exec env LD_PRELOAD="${V4L2_COMPAT}" \
     "${UVC_GADGET_BIN}" -c "/dev/video${CAMERA_ID}" uvc.0
