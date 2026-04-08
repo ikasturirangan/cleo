@@ -36,22 +36,25 @@ log "Building uvc-gadget"
 rm -rf /tmp/uvc-gadget
 git clone https://github.com/kbingham/uvc-gadget /tmp/uvc-gadget
 cd /tmp/uvc-gadget
-# Include aarch64 multiarch pkg-config path so meson finds libcamera-dev
-export PKG_CONFIG_PATH="/usr/lib/aarch64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
 meson setup build -Dwerror=false
-# Abort early if libcamera was not detected — camera will not work without it
-if ! grep -q '"libcamera"' build/meson-info/intro-dependencies.json 2>/dev/null; then
-    die "libcamera not detected in uvc-gadget build. Ensure libcamera-dev is installed and pkg-config can find it."
-fi
-log "libcamera detected — uvc-gadget will support Pi camera"
 ninja -C build -j$(nproc) 2>&1 | tail -5
 sudo cp build/src/uvc-gadget /usr/local/bin/
-# Copy shared library if the build produced one
+# Copy shared library if the build produced one (not all configs produce it)
 if [ -f build/lib/libuvcgadget.so.0.1.0 ]; then
     sudo cp build/lib/libuvcgadget.so.0.1.0 /usr/local/lib/
 fi
 sudo ldconfig
 log "uvc-gadget installed"
+
+# kbingham/uvc-gadget is V4L2-only; it uses libcamera through the libcamera
+# v4l2-compat shim (LD_PRELOAD) at runtime — verify the shim exists.
+V4L2_COMPAT=/usr/lib/aarch64-linux-gnu/libcamera/v4l2-compat.so
+if [ ! -f "${V4L2_COMPAT}" ]; then
+    log "v4l2-compat.so not found at ${V4L2_COMPAT} — installing libcamera-v4l2"
+    sudo apt-get install -y libcamera-v4l2 2>/dev/null || \
+        die "Cannot find libcamera v4l2-compat.so. Camera will not work."
+fi
+log "libcamera v4l2-compat.so present — camera will work via LD_PRELOAD"
 
 # ── 4. slitcam-pi-camera binary (pre-built) ───────────────────────────────────
 

@@ -272,21 +272,12 @@ if ! ip link show usb0 &>/dev/null; then
     warn "usb0 did not appear — CDC NCM may not be supported by the host kernel"
 fi
 
-log "Gadget bound; waiting for UVC video device..."
-UVC_DEV=""
-for i in $(seq 1 20); do
-    for dev in /dev/video*; do
-        [[ -e "${dev}" ]] || continue
-        if udevadm info --query=all --name="${dev}" 2>/dev/null | grep -q "uvc_video"; then
-            UVC_DEV="${dev}"
-            break 2
-        fi
-    done
-    sleep 0.5
-done
-if [[ -z "${UVC_DEV}" ]]; then
-    warn "UVC video device did not appear after 10s; trying anyway"
-fi
+# kbingham/uvc-gadget is V4L2-only; route camera through libcamera's v4l2-compat
+# shim so it can access the Pi camera (imx708) which only speaks libcamera.
+V4L2_COMPAT="/usr/lib/aarch64-linux-gnu/libcamera/v4l2-compat.so"
+[[ -f "${V4L2_COMPAT}" ]] \
+    || die "libcamera v4l2-compat.so not found at ${V4L2_COMPAT}; reinstall libcamera-dev"
 
-log "Starting uvc-gadget (camera ${CAMERA_ID})"
-exec "${UVC_GADGET_BIN}" -c "${CAMERA_ID}" uvc.0
+log "Starting uvc-gadget (camera /dev/video${CAMERA_ID} via libcamera v4l2-compat)"
+exec env LD_PRELOAD="${V4L2_COMPAT}" \
+    "${UVC_GADGET_BIN}" -c "/dev/video${CAMERA_ID}" uvc.0
