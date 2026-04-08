@@ -37,6 +37,10 @@ pub struct Settings {
     pub home_max_steps: u32,
     /// Steps to back off after stall is detected during homing.
     pub home_backoff_steps: u32,
+    /// UART device for TMC2209 configuration (TX-only).
+    pub uart_device: String,
+    /// StallGuard2 threshold 0–255 (higher = more sensitive).
+    pub sg_threshold: u8,
 }
 
 impl Settings {
@@ -108,6 +112,11 @@ impl Settings {
                 &env_or_default("SLITCAM_HOME_BACKOFF_STEPS", "100"),
                 "SLITCAM_HOME_BACKOFF_STEPS",
             )?,
+            uart_device: env_or_default("SLITCAM_UART_DEVICE", "/dev/serial0"),
+            sg_threshold: parse_u32(
+                &env_or_default("SLITCAM_SG_THRESHOLD", "80"),
+                "SLITCAM_SG_THRESHOLD",
+            )? as u8,
         };
 
         settings.validate()?;

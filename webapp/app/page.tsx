@@ -3,14 +3,12 @@
 import { useEffect, useState } from 'react'
 import { Toaster, toast } from 'sonner'
 import { ConnectionBar } from '@/components/connection-bar'
-import { DeviceStatus } from '@/components/device-status'
 import { CameraView } from '@/components/camera-view'
-import { SlitControls } from '@/components/slit-controls'
 import { MotionControls } from '@/components/motion-controls'
 import { getState } from '@/lib/api'
 import type { DeviceState } from '@/lib/types'
 
-const POLL_MS = 1000
+const POLL_MS = 800
 
 export default function Home() {
   const [state, setState] = useState<DeviceState | null>(null)
@@ -23,7 +21,6 @@ export default function Home() {
 
     async function poll() {
       if (!mounted) return
-
       const data = await getState()
       if (!mounted) return
 
@@ -31,21 +28,18 @@ export default function Home() {
         setState(data)
         setConnected(true)
         setError(null)
-
-        // Surface new device-reported errors as toasts (deduplicated).
         for (const e of data.errors) {
           if (!seenErrors.has(e)) {
             seenErrors.add(e)
             toast.error(e)
           }
         }
-        // Clear seen errors that are no longer active.
         for (const e of seenErrors) {
           if (!data.errors.includes(e)) seenErrors.delete(e)
         }
       } else {
         setConnected(false)
-        setError('Cannot reach device')
+        setError('Cannot reach Pi')
       }
     }
 
@@ -58,20 +52,18 @@ export default function Home() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="min-h-screen bg-slate-50">
       <Toaster position="top-right" richColors closeButton />
       <ConnectionBar connected={connected} error={error} />
 
-      <main className="container mx-auto p-4 grid grid-cols-1 lg:grid-cols-3 gap-4 pt-6">
-        {/* Left: camera view (spans 2 columns on large screens) */}
+      <main className="max-w-6xl mx-auto p-4 pt-5 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Camera — spans 2 columns */}
         <div className="lg:col-span-2">
-          <CameraView state={state} />
+          <CameraView />
         </div>
 
-        {/* Right: control stack */}
+        {/* Controls */}
         <div className="space-y-4">
-          <DeviceStatus state={state} />
-          <SlitControls state={state} />
           <MotionControls state={state} />
         </div>
       </main>

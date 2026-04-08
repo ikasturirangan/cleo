@@ -3,6 +3,9 @@ name = "slitcam-pi-camera"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies]
+tiny_http = "0.12"
+
 
 [profile.release]
 panic = "abort"

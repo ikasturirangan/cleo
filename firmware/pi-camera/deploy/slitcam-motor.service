@@ -1,0 +1,23 @@
+[Unit]
+Description=SlitCam Motor API
+After=uvc-gadget.service network.target
+Wants=uvc-gadget.service
+ConditionPathExists=/usr/local/bin/slitcam-pi-camera
+
+[Service]
+Type=simple
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+EnvironmentFile=-/etc/slitcam/pi-camera.env
+ExecStart=/usr/local/bin/slitcam-pi-camera serve
+Restart=on-failure
+RestartSec=3
+User=root
+Group=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=/sys/class/gpio /run
+
+[Install]
+WantedBy=multi-user.target

@@ -1,3 +1,4 @@
+mod api;
 mod config;
 mod gadget;
 mod logging;
@@ -28,6 +29,7 @@ fn main() -> ExitCode {
 
     let result = match command.as_str() {
         "run" => run(&settings),
+        "serve" => serve_api(&settings),
         "cleanup" => gadget::cleanup(&settings),
         "preflight" => gadget::preflight(&settings),
         "print-env" => {
@@ -102,6 +104,18 @@ fn run(settings: &Settings) -> Result<(), String> {
             "uvc-gadget exited with status {status}; inspect journalctl for details"
         ))
     }
+}
+
+fn serve_api(settings: &Settings) -> Result<(), String> {
+    let motion = match Motion::open(settings) {
+        Ok(m) => {
+            logging::info("TMC2209 step/dir GPIO ready");
+            Arc::new(Mutex::new(m))
+        }
+        Err(e) => return Err(format!("TMC2209 GPIO open failed: {e}")),
+    };
+    api::serve(motion, Arc::new(settings.clone()));
+    Ok(())
 }
 
 fn print_help() {

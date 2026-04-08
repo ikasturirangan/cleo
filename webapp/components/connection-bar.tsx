@@ -1,8 +1,5 @@
 'use client'
 
-import { Badge } from '@/components/ui/badge'
-import { Wifi, WifiOff } from 'lucide-react'
-
 interface Props {
   connected: boolean
   error: string | null
@@ -10,25 +7,24 @@ interface Props {
 
 export function ConnectionBar({ connected, error }: Props) {
   return (
-    <header className="sticky top-0 z-10 border-b border-border bg-card px-4 py-3 flex items-center justify-between">
+    <header className="border-b bg-white px-6 py-3 flex items-center justify-between">
       <div className="flex items-center gap-3">
-        <span className="font-semibold text-lg tracking-tight">SlitCam</span>
-        <span className="text-muted-foreground text-sm hidden sm:block">
-          Control Panel
-        </span>
+        <span className="font-bold text-base tracking-tight text-slate-800">SlitCam</span>
+        <span className="text-slate-400 text-sm">Control Panel</span>
       </div>
       <div className="flex items-center gap-2">
-        {connected ? (
-          <Badge className="gap-1.5 bg-green-600 hover:bg-green-700 text-white">
-            <Wifi className="h-3 w-3" />
-            Connected
-          </Badge>
-        ) : (
-          <Badge variant="destructive" className="gap-1.5">
-            <WifiOff className="h-3 w-3" />
-            {error ?? 'Disconnected'}
-          </Badge>
-        )}
+        <span
+          className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${
+            connected
+              ? 'bg-green-50 text-green-700 border border-green-200'
+              : 'bg-red-50 text-red-700 border border-red-200'
+          }`}
+        >
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}
+          />
+          {connected ? 'Connected' : error ?? 'Disconnected'}
+        </span>
       </div>
     </header>
   )

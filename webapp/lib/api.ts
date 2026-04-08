@@ -1,40 +1,50 @@
-import type { CommandResponse, ControlCommand, DeviceState } from '@/lib/types'
+import type { DeviceState, MotionState } from '@/lib/types'
 
 // All calls go through the Next.js API proxy to avoid CORS.
-// The proxy forwards to BBB_API_URL (server env var).
-const BASE = '/api/bbb'
+const BASE = '/api/pi'
 
-export async function getState(): Promise<DeviceState | null> {
+// ── Pi motor API ──────────────────────────────────────────────────────────────
+
+export async function getMotorState(): Promise<MotionState | null> {
   try {
     const res = await fetch(`${BASE}/state`, { cache: 'no-store' })
     if (!res.ok) return null
-    const body = (await res.json()) as CommandResponse
-    if (body.type === 'state') {
-      const { type: _type, ...state } = body
-      return state as DeviceState
-    }
-    return null
+    return res.json() as Promise<MotionState>
   } catch {
     return null
   }
 }
 
-export async function sendCommand(cmd: ControlCommand): Promise<CommandResponse> {
-  const res = await fetch(`${BASE}/command`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(cmd),
-  })
-  return res.json() as Promise<CommandResponse>
+export async function moveMotor(steps: number): Promise<{ ok: boolean; error?: string; position_steps?: number }> {
+  try {
+    const res = await fetch(`${BASE}/move?steps=${steps}`, { method: 'POST', cache: 'no-store' })
+    return res.json()
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
 }
 
-export async function ping(): Promise<boolean> {
+export async function homeMotor(): Promise<{ ok: boolean; error?: string }> {
   try {
-    const res = await fetch(`${BASE}/health`, { cache: 'no-store' })
-    if (!res.ok) return false
-    const body = (await res.json()) as CommandResponse
-    return body.type === 'ok'
-  } catch {
-    return false
+    const res = await fetch(`${BASE}/home`, { method: 'POST', cache: 'no-store' })
+    return res.json()
+  } catch (err) {
+    return { ok: false, error: String(err) }
+  }
+}
+
+// ── Legacy device state (used by connection bar / device status) ──────────────
+// Polls the Pi motor state and constructs a minimal DeviceState so existing
+// components keep working while BBB integration is pending.
+
+export async function getState(): Promise<DeviceState | null> {
+  const motion = await getMotorState()
+  if (!motion) return null
+  return {
+    camera: { connected: true, device_path: '', capture_width: 0, capture_height: 0 },
+    slit: { width_um: 0, angle_deg: 0, brightness: 0, offset_x_px: 0, offset_y_px: 0 },
+    motion,
+    dlp_ready: false,
+    errors: [],
   }
 }

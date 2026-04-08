@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# UVC gadget setup and launch script for Raspberry Pi Zero 2 W.
+# UVC + CDC NCM composite gadget for Raspberry Pi Zero 2 W.
 #
-# Sets up the USB configfs gadget (same IDs and frame descriptors as the Rust
-# slitcam-pi-camera service) then runs uvc-gadget in the foreground so that
-# systemd can track the process and restart it on failure.
+# Exposes two USB functions:
+#   uvc.0  — webcam (UVC)
+#   ncm.usb0 — USB ethernet (CDC NCM) at 192.168.7.1
 #
 # Install:
 #   sudo cp rpi-uvc-gadget.sh /usr/local/bin/rpi-uvc-gadget.sh
@@ -18,13 +18,19 @@ USB_PRODUCT_ID="${SLITCAM_USB_PRODUCT_ID:-0xa4a2}"
 USB_SERIAL="${SLITCAM_USB_SERIAL:-SLITCAM-0001}"
 USB_MANUFACTURER="${SLITCAM_USB_MANUFACTURER:-$(cat /proc/sys/kernel/hostname 2>/dev/null || echo slitcam-pi)}"
 USB_PRODUCT="${SLITCAM_USB_PRODUCT:-SlitCam Pi Camera}"
-USB_CONFIGURATION="${SLITCAM_USB_CONFIGURATION:-UVC}"
+USB_CONFIGURATION="${SLITCAM_USB_CONFIGURATION:-UVC+NCM}"
 MAX_POWER_MA="${SLITCAM_USB_MAX_POWER_MA:-500}"
 CAMERA_ID="${SLITCAM_CAMERA_ID:-0}"
 UVC_GADGET_BIN="${SLITCAM_UVC_GADGET_BIN:-/usr/local/bin/uvc-gadget}"
 UDC_WAIT_SECS="${SLITCAM_UDC_WAIT_SECS:-60}"
 UVC_RESOLUTION="${SLITCAM_UVC_RESOLUTION:-640x480}"
 UVC_FRAMERATE="${SLITCAM_UVC_FRAMERATE:-30}"
+
+# CDC NCM — fixed MACs so the Mac always sees the same interface.
+NCM_DEV_ADDR="${SLITCAM_NCM_DEV_ADDR:-42:61:61:61:61:01}"   # Pi side
+NCM_HOST_ADDR="${SLITCAM_NCM_HOST_ADDR:-42:61:61:61:61:02}"  # Mac side
+NCM_PI_IP="${SLITCAM_NCM_PI_IP:-192.168.7.1}"
+NCM_PREFIX="${SLITCAM_NCM_PREFIX:-24}"
 
 CONFIGFS_ROOT="/sys/kernel/config"
 GADGET_DIR="${CONFIGFS_ROOT}/usb_gadget/${GADGET_NAME}"
@@ -34,17 +40,87 @@ die()  { log "ERROR: $1"; exit 1; }
 warn() { log "WARN:  $1"; }
 
 # ── cleanup ───────────────────────────────────────────────────────────────────
+#
+# configfs does NOT support rm -rf — the kernel requires an exact teardown
+# order: remove symlinks first, then rmdir leaf dirs, then parents.
+
+teardown_gadget() {
+    local gdir="$1"
+    [[ -d "${gdir}" ]] || return 0
+
+    local f="${gdir}/functions/uvc.0"
+
+    # 1. Bring down USB network interface before unbinding.
+    ip link set usb0 down   2>/dev/null || true
+    ip addr flush dev usb0  2>/dev/null || true
+
+    # 2. Unbind from UDC so the host sees device disconnect.
+    if [[ -f "${gdir}/UDC" ]]; then
+        echo "" > "${gdir}/UDC" 2>/dev/null || true
+        sleep 0.1
+    fi
+
+    # 3. Remove config symlinks (UVC and NCM).
+    rm -f "${gdir}/configs/c.1/uvc.0"   2>/dev/null || true
+    rm -f "${gdir}/configs/c.1/ncm.usb0" 2>/dev/null || true
+
+    # 4. Tear down UVC function (symlinks → leaf dirs → parent dirs).
+    if [[ -d "${f}" ]]; then
+        rm -f "${f}/streaming/class/fs/h" 2>/dev/null || true
+        rm -f "${f}/streaming/class/hs/h" 2>/dev/null || true
+        rm -f "${f}/streaming/class/ss/h" 2>/dev/null || true
+        rm -f "${f}/control/class/fs/h"   2>/dev/null || true
+        rm -f "${f}/control/class/ss/h"   2>/dev/null || true
+        rm -f "${f}/streaming/header/h/u" 2>/dev/null || true
+        rm -f "${f}/streaming/header/h/m" 2>/dev/null || true
+
+        rmdir "${f}/streaming/class/fs" 2>/dev/null || true
+        rmdir "${f}/streaming/class/hs" 2>/dev/null || true
+        rmdir "${f}/streaming/class/ss" 2>/dev/null || true
+        rmdir "${f}/streaming/class"    2>/dev/null || true
+        rmdir "${f}/control/class/fs"   2>/dev/null || true
+        rmdir "${f}/control/class/ss"   2>/dev/null || true
+        rmdir "${f}/control/class"      2>/dev/null || true
+        rmdir "${f}/streaming/header/h" 2>/dev/null || true
+        rmdir "${f}/streaming/header"   2>/dev/null || true
+        rmdir "${f}/control/header/h"   2>/dev/null || true
+        rmdir "${f}/control/header"     2>/dev/null || true
+
+        for frame_dir in "${f}/streaming/uncompressed/u"/*/; do
+            rmdir "${frame_dir}" 2>/dev/null || true
+        done
+        rmdir "${f}/streaming/uncompressed/u" 2>/dev/null || true
+        rmdir "${f}/streaming/uncompressed"   2>/dev/null || true
+
+        for frame_dir in "${f}/streaming/mjpeg/m"/*/; do
+            rmdir "${frame_dir}" 2>/dev/null || true
+        done
+        rmdir "${f}/streaming/mjpeg/m" 2>/dev/null || true
+        rmdir "${f}/streaming/mjpeg"   2>/dev/null || true
+
+        rmdir "${f}/streaming" 2>/dev/null || true
+        rmdir "${f}/control"   2>/dev/null || true
+        rmdir "${f}"           2>/dev/null || true
+    fi
+
+    # 5. Remove NCM function dir (kernel-managed, just rmdir).
+    rmdir "${gdir}/functions/ncm.usb0" 2>/dev/null || true
+
+    # 6. Remove config strings then config.
+    rmdir "${gdir}/configs/c.1/strings/0x409" 2>/dev/null || true
+    rmdir "${gdir}/configs/c.1/strings"       2>/dev/null || true
+    rmdir "${gdir}/configs/c.1"               2>/dev/null || true
+    rmdir "${gdir}/configs"                   2>/dev/null || true
+
+    # 7. Remove gadget strings then gadget root.
+    rmdir "${gdir}/strings/0x409" 2>/dev/null || true
+    rmdir "${gdir}/strings"       2>/dev/null || true
+    rmdir "${gdir}"               2>/dev/null || true
+}
 
 cleanup() {
     log "Cleaning up gadget ${GADGET_NAME}"
-    # Unbind the UDC before removing the gadget tree.
-    local udc_file="${GADGET_DIR}/UDC"
-    if [[ -f "${udc_file}" ]]; then
-        echo "" > "${udc_file}" 2>/dev/null || true
-    fi
-    if [[ -d "${GADGET_DIR}" ]]; then
-        rm -rf "${GADGET_DIR}" 2>/dev/null || true
-    fi
+    teardown_gadget "${GADGET_DIR}"
 }
 
 # Register cleanup for normal exit and signals so systemd ExecStop is not
@@ -75,7 +151,7 @@ wait_for_udc() {
             return 0
         fi
         if [[ $(date +%s) -ge ${deadline} ]]; then
-            die "no USB device controller found under /sys/class/udc after ${UDC_WAIT_SECS} seconds; connect the USB host to the Pi Zero 2 W data port"
+            die "no USB device controller found under /sys/class/udc after ${UDC_WAIT_SECS} seconds"
         fi
         sleep 1
     done
@@ -84,16 +160,15 @@ wait_for_udc() {
 # ── module loading ────────────────────────────────────────────────────────────
 
 log "Loading kernel modules"
-modprobe dwc2   2>/dev/null || warn "dwc2 already loaded or unavailable"
+modprobe dwc2         2>/dev/null || warn "dwc2 already loaded or unavailable"
 modprobe libcomposite
+modprobe usb_f_ncm    2>/dev/null || warn "usb_f_ncm not available (CDC NCM may be built-in)"
 
 # ── gadget teardown (idempotent) ──────────────────────────────────────────────
 
 if [[ -d "${GADGET_DIR}" ]]; then
     warn "Stale gadget directory found; removing before setup"
-    local_udc_file="${GADGET_DIR}/UDC"
-    [[ -f "${local_udc_file}" ]] && echo "" > "${local_udc_file}" 2>/dev/null || true
-    rm -rf "${GADGET_DIR}"
+    teardown_gadget "${GADGET_DIR}"
 fi
 
 # ── UDC discovery (after modules are loaded) ─────────────────────────────────
@@ -133,54 +208,70 @@ mkdir -p "${F}/streaming/class/fs"
 mkdir -p "${F}/streaming/class/hs"
 mkdir -p "${F}/streaming/class/ss"
 
-# Helper: create one uncompressed or MJPEG frame descriptor.
-# Usage: add_frame <format_dir> <frame_name_prefix> <width> <height> <intervals…>
 add_frame() {
     local fmt="$1" name="$2" w="$3" h="$4"
     shift 4
     local fdir="${F}/streaming/${fmt}/${name}/${h}p"
     mkdir -p "${fdir}"
-    echo "${w}"                      > "${fdir}/wWidth"
-    echo "${h}"                      > "${fdir}/wHeight"
-    echo $(( w * h * 2 ))           > "${fdir}/dwMaxVideoFrameBufferSize"
-    printf '%s\n' "$@"              > "${fdir}/dwFrameInterval"
+    echo "${w}"             > "${fdir}/wWidth"
+    echo "${h}"             > "${fdir}/wHeight"
+    echo $(( w * h * 2 ))  > "${fdir}/dwMaxVideoFrameBufferSize"
+    printf '%s\n' "$@"     > "${fdir}/dwFrameInterval"
 }
 
-# Uncompressed (YUYV) modes — must match FRAME_SPECS in gadget.rs
 add_frame uncompressed u  640  480  333333 416667 500000 666666 1000000 1333333 2000000
 add_frame uncompressed u 1280  720  1000000 1333333 2000000
 add_frame uncompressed u 1920 1080  2000000
 
-# MJPEG modes
 add_frame mjpeg m  640  480  333333 416667 500000 666666 1000000 1333333 2000000
 add_frame mjpeg m 1280  720  333333 416667 500000 666666 1000000 1333333 2000000
 add_frame mjpeg m 1920 1080  333333 416667 500000 666666 1000000 1333333 2000000
 
-# Link format directories into the streaming header
 ln -s "${F}/streaming/uncompressed/u" "${F}/streaming/header/h/u"
 ln -s "${F}/streaming/mjpeg/m"        "${F}/streaming/header/h/m"
 
-# Link streaming header into each speed class
 ln -s "${F}/streaming/header/h" "${F}/streaming/class/fs/h"
 ln -s "${F}/streaming/header/h" "${F}/streaming/class/hs/h"
 ln -s "${F}/streaming/header/h" "${F}/streaming/class/ss/h"
 
-# Link control header into each speed class
 ln -s "${F}/control/header/h" "${F}/control/class/fs/h"
 ln -s "${F}/control/header/h" "${F}/control/class/ss/h"
 
 echo "2048" > "${F}/streaming_maxpacket"
 
-# Link the function into the configuration
 ln -s "${F}" "${GADGET_DIR}/configs/c.1/uvc.0"
+
+# ── CDC NCM function ──────────────────────────────────────────────────────────
+
+log "Creating CDC NCM function"
+NCM="${GADGET_DIR}/functions/ncm.usb0"
+mkdir -p "${NCM}"
+echo "${NCM_DEV_ADDR}"  > "${NCM}/dev_addr"
+echo "${NCM_HOST_ADDR}" > "${NCM}/host_addr"
+
+ln -s "${NCM}" "${GADGET_DIR}/configs/c.1/ncm.usb0"
 
 # ── bind to UDC ───────────────────────────────────────────────────────────────
 
 log "Binding gadget to UDC ${UDC_NAME}"
 echo "${UDC_NAME}" > "${GADGET_DIR}/UDC"
 
+# ── configure USB network interface ───────────────────────────────────────────
+
+log "Waiting for usb0 interface..."
+for i in $(seq 1 10); do
+    if ip link show usb0 &>/dev/null; then
+        ip addr add "${NCM_PI_IP}/${NCM_PREFIX}" dev usb0 2>/dev/null || true
+        ip link set usb0 up
+        log "USB network interface usb0 up at ${NCM_PI_IP}"
+        break
+    fi
+    sleep 0.5
+done
+if ! ip link show usb0 &>/dev/null; then
+    warn "usb0 did not appear — CDC NCM may not be supported by the host kernel"
+fi
+
 log "Gadget bound; starting uvc-gadget (camera ${CAMERA_ID})"
 
-# Run uvc-gadget in the foreground.  systemd tracks this process; if it exits
-# the service restarts per Restart=on-failure.
-exec "${UVC_GADGET_BIN}" -c "${CAMERA_ID}" -r "${UVC_RESOLUTION}" -f "${UVC_FRAMERATE}" uvc.0
+exec "${UVC_GADGET_BIN}" -c "${CAMERA_ID}" uvc.0

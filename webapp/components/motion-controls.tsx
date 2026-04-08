@@ -2,15 +2,10 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronUp, Home } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Separator } from '@/components/ui/separator'
-import { sendCommand } from '@/lib/api'
+import { moveMotor, homeMotor } from '@/lib/api'
 import type { DeviceState } from '@/lib/types'
 
-const STEP_SIZES = [1, 10, 100] as const
+const STEPS = [1, 5, 10, 50, 100, 500] as const
 
 interface Props {
   state: DeviceState | null
@@ -18,18 +13,16 @@ interface Props {
 
 export function MotionControls({ state }: Props) {
   const [pending, setPending] = useState(false)
-  const [stepSize, setStepSize] = useState<number>(10)
-
-  const homed = state?.motion.homed ?? false
   const position = state?.motion.position_steps ?? 0
+  const homed = state?.motion.homed ?? false
 
   async function move(steps: number) {
     setPending(true)
     try {
-      const res = await sendCommand({ type: 'move_focus', steps })
-      if (res.type === 'error') toast.error(`Motion error: ${res.message}`)
+      const res = await moveMotor(steps)
+      if (!res.ok) toast.error(res.error ?? 'Move failed')
     } catch {
-      toast.error('Failed to send move command')
+      toast.error('Move command failed')
     } finally {
       setPending(false)
     }
@@ -38,89 +31,73 @@ export function MotionControls({ state }: Props) {
   async function home() {
     setPending(true)
     try {
-      const res = await sendCommand({ type: 'home_focus' })
-      if (res.type === 'error') toast.error(`Homing error: ${res.message}`)
-      else toast.success('Homing complete')
+      const res = await homeMotor()
+      if (!res.ok) toast.error(res.error ?? 'Homing failed')
+      else toast.success('Homed')
     } catch {
-      toast.error('Failed to send home command')
+      toast.error('Home command failed')
     } finally {
       setPending(false)
     }
   }
 
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm font-medium flex items-center justify-between">
-          Focus Control
-          <Badge
-            className={
-              homed
-                ? 'bg-green-600 hover:bg-green-700 text-white font-mono tabular-nums'
-                : 'font-mono'
-            }
-            variant={homed ? 'default' : 'secondary'}
-          >
-            {homed ? `${position} steps` : 'Not homed'}
-          </Badge>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        {/* Step size selector */}
-        <div className="flex gap-1">
-          {STEP_SIZES.map((s) => (
-            <Button
-              key={s}
-              variant={stepSize === s ? 'default' : 'outline'}
-              size="sm"
-              className="flex-1 text-xs h-7"
-              onClick={() => setStepSize(s)}
+    <div className="bg-white border rounded-lg p-4 space-y-4">
+      {/* Header + position */}
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-semibold text-slate-700">Focus Control</span>
+        <div className="text-right">
+          <span className="font-mono text-sm font-bold text-slate-800">
+            {position} <span className="font-normal text-slate-400">steps</span>
+          </span>
+          {homed && (
+            <span className="ml-2 text-xs text-green-600 font-medium">Homed</span>
+          )}
+        </div>
+      </div>
+
+      {/* Forward buttons */}
+      <div>
+        <p className="text-xs text-slate-400 mb-1.5">Forward (+)</p>
+        <div className="grid grid-cols-6 gap-1">
+          {STEPS.map((s) => (
+            <button
+              key={`f${s}`}
+              onClick={() => move(s)}
+              disabled={pending}
+              className="py-2 text-xs font-medium rounded border border-slate-200 bg-slate-50 hover:bg-blue-50 hover:border-blue-300 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
-              {s}
-            </Button>
+              +{s}
+            </button>
           ))}
         </div>
+      </div>
 
-        {/* Move buttons */}
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            className="flex-1"
-            disabled={pending || !homed}
-            onClick={() => move(stepSize)}
-          >
-            <ChevronUp className="h-4 w-4" />
-            +{stepSize}
-          </Button>
-          <Button
-            variant="outline"
-            className="flex-1"
-            disabled={pending || !homed}
-            onClick={() => move(-stepSize)}
-          >
-            <ChevronDown className="h-4 w-4" />
-            -{stepSize}
-          </Button>
+      {/* Backward buttons */}
+      <div>
+        <p className="text-xs text-slate-400 mb-1.5">Backward (−)</p>
+        <div className="grid grid-cols-6 gap-1">
+          {STEPS.map((s) => (
+            <button
+              key={`b${s}`}
+              onClick={() => move(-s)}
+              disabled={pending}
+              className="py-2 text-xs font-medium rounded border border-slate-200 bg-slate-50 hover:bg-amber-50 hover:border-amber-300 hover:text-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              −{s}
+            </button>
+          ))}
         </div>
+      </div>
 
-        <Separator />
-
-        <Button
-          variant="secondary"
-          className="w-full"
-          disabled={pending}
-          onClick={home}
-        >
-          <Home className="h-4 w-4 mr-1.5" />
-          Home
-        </Button>
-
-        {!homed && (
-          <p className="text-xs text-muted-foreground text-center">
-            Home the motor before moving
-          </p>
-        )}
-      </CardContent>
-    </Card>
+      {/* Home */}
+      <button
+        onClick={home}
+        disabled={pending}
+        className="w-full py-2.5 text-sm font-semibold rounded border border-slate-300 bg-white hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors text-slate-700"
+      >
+        {pending ? 'Working…' : 'Home Motor'}
+      </button>
+    </div>
   )
 }
