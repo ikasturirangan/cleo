@@ -1,37 +1,73 @@
 #!/usr/bin/env python3
-"""MJPEG HTTP stream from Pi camera using picamera2 (libcamera).
+"""MJPEG HTTP stream from Pi camera using rpicam-vid (no extra packages needed).
 
 Streams at http://0.0.0.0:8080/stream.mjpg
 """
-import io
 import os
-import sys
+import subprocess
 import threading
 from http import server
 
-from picamera2 import Picamera2
-from picamera2.encoders import MJPEGEncoder
-from picamera2.outputs import FileOutput
-
-PORT    = int(os.environ.get("SLITCAM_STREAM_PORT", "8080"))
-WIDTH   = int(os.environ.get("SLITCAM_STREAM_WIDTH", "640"))
-HEIGHT  = int(os.environ.get("SLITCAM_STREAM_HEIGHT", "480"))
-FPS     = int(os.environ.get("SLITCAM_STREAM_FPS", "30"))
+PORT   = int(os.environ.get("SLITCAM_STREAM_PORT",   "8080"))
+WIDTH  = int(os.environ.get("SLITCAM_STREAM_WIDTH",  "640"))
+HEIGHT = int(os.environ.get("SLITCAM_STREAM_HEIGHT", "480"))
+FPS    = int(os.environ.get("SLITCAM_STREAM_FPS",    "30"))
 
 
-class StreamingOutput(io.BufferedIOBase):
+class FrameBuffer:
+    """Holds the latest JPEG frame; notifies waiting HTTP handlers."""
     def __init__(self):
         self.frame = None
         self.condition = threading.Condition()
 
-    def write(self, buf):
+    def put(self, frame: bytes):
         with self.condition:
-            self.frame = buf
+            self.frame = frame
             self.condition.notify_all()
-        return len(buf)
+
+    def get(self):
+        with self.condition:
+            self.condition.wait()
+            return self.frame
 
 
-class StreamingHandler(server.BaseHTTPRequestHandler):
+buf = FrameBuffer()
+
+
+def capture_loop():
+    """Run rpicam-vid and split its raw MJPEG output into individual frames."""
+    cmd = [
+        "rpicam-vid",
+        "--codec", "mjpeg",
+        "--width",  str(WIDTH),
+        "--height", str(HEIGHT),
+        "--framerate", str(FPS),
+        "--nopreview",
+        "-t", "0",   # run forever
+        "-o", "-",   # stdout
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    data = b""
+    while True:
+        chunk = proc.stdout.read(65536)
+        if not chunk:
+            break
+        data += chunk
+        # Split on JPEG SOI/EOI boundaries (0xFF 0xD8 ... 0xFF 0xD9)
+        while True:
+            soi = data.find(b"\xff\xd8")
+            if soi == -1:
+                data = b""
+                break
+            eoi = data.find(b"\xff\xd9", soi + 2)
+            if eoi == -1:
+                data = data[soi:]   # keep partial frame for next read
+                break
+            buf.put(data[soi : eoi + 2])
+            data = data[eoi + 2:]
+
+
+class StreamHandler(server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/stream.mjpg":
             self.send_response(200)
@@ -46,15 +82,14 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self.end_headers()
             try:
                 while True:
-                    with output.condition:
-                        output.condition.wait()
-                        frame = output.frame
-                    self.wfile.write(b"--FRAME\r\n")
-                    self.send_header("Content-Type", "image/jpeg")
-                    self.send_header("Content-Length", str(len(frame)))
-                    self.end_headers()
-                    self.wfile.write(frame)
-                    self.wfile.write(b"\r\n")
+                    frame = buf.get()
+                    self.wfile.write(
+                        b"--FRAME\r\n"
+                        b"Content-Type: image/jpeg\r\n"
+                        + f"Content-Length: {len(frame)}\r\n\r\n".encode()
+                        + frame
+                        + b"\r\n"
+                    )
             except Exception:
                 pass
         elif self.path == "/healthz":
@@ -66,30 +101,17 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self.send_error(404)
 
     def log_message(self, fmt, *args):
-        pass  # suppress per-request access logs
+        pass
 
 
-output = StreamingOutput()
-
-picam2 = Picamera2()
-config = picam2.create_video_configuration(
-    main={"size": (WIDTH, HEIGHT), "format": "RGB888"},
-    controls={"FrameRate": FPS},
-)
-picam2.configure(config)
-picam2.start_recording(MJPEGEncoder(), FileOutput(output))
+t = threading.Thread(target=capture_loop, daemon=True)
+t.start()
 
 print(
-    f"[camera-stream] MJPEG stream at http://0.0.0.0:{PORT}/stream.mjpg "
+    f"[camera-stream] MJPEG at http://0.0.0.0:{PORT}/stream.mjpg "
     f"({WIDTH}x{HEIGHT} @ {FPS}fps)",
     flush=True,
 )
 
-try:
-    httpd = server.HTTPServer(("", PORT), StreamingHandler)
-    httpd.serve_forever()
-except KeyboardInterrupt:
-    pass
-finally:
-    picam2.stop_recording()
-    sys.exit(0)
+httpd = server.HTTPServer(("", PORT), StreamHandler)
+httpd.serve_forever()

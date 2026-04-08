@@ -24,7 +24,8 @@ sudo raspi-config nonint do_serial_cons 1
 log "Installing dependencies"
 sudo apt-get update -qq
 sudo apt-get install -y \
-    python3-picamera2 \
+    python3 \
+    rpicam-apps \
     iproute2
 
 # ── 3. Camera stream script ───────────────────────────────────────────────────
