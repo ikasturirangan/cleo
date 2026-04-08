@@ -272,6 +272,21 @@ if ! ip link show usb0 &>/dev/null; then
     warn "usb0 did not appear — CDC NCM may not be supported by the host kernel"
 fi
 
-log "Gadget bound; starting uvc-gadget (camera ${CAMERA_ID})"
+log "Gadget bound; waiting for UVC video device..."
+UVC_DEV=""
+for i in $(seq 1 20); do
+    for dev in /dev/video*; do
+        [[ -e "${dev}" ]] || continue
+        if udevadm info --query=all --name="${dev}" 2>/dev/null | grep -q "uvc_video"; then
+            UVC_DEV="${dev}"
+            break 2
+        fi
+    done
+    sleep 0.5
+done
+if [[ -z "${UVC_DEV}" ]]; then
+    warn "UVC video device did not appear after 10s; trying anyway"
+fi
 
+log "Starting uvc-gadget (camera ${CAMERA_ID})"
 exec "${UVC_GADGET_BIN}" -c "${CAMERA_ID}" uvc.0
