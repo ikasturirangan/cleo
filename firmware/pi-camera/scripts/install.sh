@@ -3,6 +3,9 @@
 # Usage: bash <(curl -fsSL https://raw.githubusercontent.com/ikasturirangan/cleo/main/firmware/pi-camera/scripts/install.sh)
 set -euo pipefail
 
+REPO=https://raw.githubusercontent.com/ikasturirangan/cleo/main
+REPO_GIT=https://github.com/ikasturirangan/cleo
+
 log()  { echo "[$(date '+%H:%M:%S')] $1"; }
 die()  { echo "[ERROR] $1"; exit 1; }
 
@@ -11,11 +14,9 @@ die()  { echo "[ERROR] $1"; exit 1; }
 log "Configuring boot: USB OTG + UART"
 CONFIG=/boot/firmware/config.txt
 
-# Remove any existing dwc2 lines to avoid conflicts
 sudo sed -i '/dtoverlay=dwc2/d' "${CONFIG}"
 echo "dtoverlay=dwc2,dr_mode=peripheral" | sudo tee -a "${CONFIG}"
 
-# Enable UART hardware, disable serial console
 sudo raspi-config nonint do_serial_hw 0
 sudo raspi-config nonint do_serial_cons 1
 
@@ -38,37 +39,17 @@ cd /tmp/uvc-gadget
 meson setup build -Dwerror=false
 ninja -C build -j$(nproc) 2>&1 | tail -5
 sudo cp build/src/uvc-gadget /usr/local/bin/
-log "uvc-gadget installed at /usr/local/bin/uvc-gadget"
+log "uvc-gadget installed"
 
-# ── 4. Rust ───────────────────────────────────────────────────────────────────
+# ── 4. slitcam-pi-camera binary (pre-built) ───────────────────────────────────
 
-log "Installing Rust"
-if ! command -v rustup &>/dev/null; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-fi
-source "$HOME/.cargo/env"
-rustup default stable
-
-# ── 5. slitcam-pi-camera binary ───────────────────────────────────────────────
-
-log "Building slitcam-pi-camera"
-REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-
-# If running from a fresh clone, REPO_DIR points to the repo.
-# If piped via curl, clone the repo first.
-if [[ ! -f "${REPO_DIR}/Cargo.toml" ]]; then
-    log "Cloning slitcam repo"
-    rm -rf /tmp/slitcam
-    git clone https://github.com/ikasturirangan/cleo /tmp/slitcam
-    REPO_DIR=/tmp/slitcam/firmware/pi-camera
-fi
-
-cd "${REPO_DIR}"
-cargo build --release 2>&1 | tail -5
-sudo cp target/release/slitcam-pi-camera /usr/local/bin/
+log "Downloading slitcam-pi-camera"
+curl -fsSL "${REPO}/firmware/pi-camera/deploy/bin/slitcam-pi-camera" \
+    -o /tmp/slitcam-pi-camera
+sudo install -m 755 /tmp/slitcam-pi-camera /usr/local/bin/slitcam-pi-camera
 log "slitcam-pi-camera installed"
 
-# ── 6. Env config ─────────────────────────────────────────────────────────────
+# ── 5. Env config ─────────────────────────────────────────────────────────────
 
 log "Writing /etc/slitcam/pi-camera.env"
 sudo mkdir -p /etc/slitcam
@@ -86,23 +67,24 @@ SLITCAM_UART_DEVICE=/dev/serial0
 SLITCAM_SG_THRESHOLD=255
 EOF
 
-# ── 7. Systemd services ───────────────────────────────────────────────────────
+# ── 6. Systemd services ───────────────────────────────────────────────────────
 
 log "Installing systemd services"
-SCRIPTS_DIR="$(dirname "${BASH_SOURCE[0]}")"
-
-sudo cp "${SCRIPTS_DIR}/rpi-uvc-gadget.sh" /usr/local/bin/rpi-uvc-gadget.sh
+curl -fsSL "${REPO}/firmware/pi-camera/scripts/rpi-uvc-gadget.sh" \
+    | sudo tee /usr/local/bin/rpi-uvc-gadget.sh > /dev/null
 sudo chmod +x /usr/local/bin/rpi-uvc-gadget.sh
 
-sudo cp "${SCRIPTS_DIR}/../deploy/uvc-gadget.service" /etc/systemd/system/
-sudo cp "${SCRIPTS_DIR}/../deploy/slitcam-motor.service" /etc/systemd/system/
+curl -fsSL "${REPO}/firmware/pi-camera/deploy/uvc-gadget.service" \
+    | sudo tee /etc/systemd/system/uvc-gadget.service > /dev/null
+curl -fsSL "${REPO}/firmware/pi-camera/deploy/slitcam-motor.service" \
+    | sudo tee /etc/systemd/system/slitcam-motor.service > /dev/null
 
 sudo systemctl daemon-reload
 sudo systemctl enable uvc-gadget.service slitcam-motor.service
 
 log "Services enabled"
 
-# ── 8. Done ───────────────────────────────────────────────────────────────────
+# ── 7. Done ───────────────────────────────────────────────────────────────────
 
 log "Install complete. Rebooting in 5 seconds..."
 sleep 5

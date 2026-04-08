@@ -1,0 +1,40 @@
+name: Build slitcam-pi-camera
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/pi-camera/**'
+      - '.github/workflows/build-pi-camera.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust aarch64 target
+        run: |
+          rustup target add aarch64-unknown-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        working-directory: firmware/pi-camera
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target aarch64-unknown-linux-gnu
+
+      - name: Copy binary to deploy/
+        run: |
+          mkdir -p firmware/pi-camera/deploy/bin
+          cp firmware/pi-camera/target/aarch64-unknown-linux-gnu/release/slitcam-pi-camera \
+             firmware/pi-camera/deploy/bin/slitcam-pi-camera
+
+      - name: Commit binary
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add firmware/pi-camera/deploy/bin/slitcam-pi-camera
+          git diff --cached --quiet || git commit -m "ci: update aarch64 binary [skip ci]"
+          git push
