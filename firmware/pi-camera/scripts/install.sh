@@ -39,6 +39,8 @@ cd /tmp/uvc-gadget
 meson setup build -Dwerror=false
 ninja -C build -j$(nproc) 2>&1 | tail -5
 sudo cp build/src/uvc-gadget /usr/local/bin/
+sudo cp build/lib/libuvcgadget.so.0.1.0 /usr/local/lib/
+sudo ldconfig
 log "uvc-gadget installed"
 
 # ── 4. slitcam-pi-camera binary (pre-built) ───────────────────────────────────
