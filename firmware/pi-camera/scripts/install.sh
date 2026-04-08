@@ -4,7 +4,6 @@
 set -euo pipefail
 
 REPO=https://raw.githubusercontent.com/ikasturirangan/cleo/main
-REPO_GIT=https://github.com/ikasturirangan/cleo
 
 log()  { echo "[$(date '+%H:%M:%S')] $1"; }
 die()  { echo "[ERROR] $1"; exit 1; }
@@ -25,26 +24,16 @@ sudo raspi-config nonint do_serial_cons 1
 log "Installing dependencies"
 sudo apt-get update -qq
 sudo apt-get install -y \
-    git cmake meson ninja-build \
-    libcamera-dev libcamera-v4l2 libudev-dev \
-    pkg-config build-essential \
-    libjpeg-dev
+    python3-picamera2 \
+    iproute2
 
-# ── 3. uvc-gadget ─────────────────────────────────────────────────────────────
+# ── 3. Camera stream script ───────────────────────────────────────────────────
 
-log "Building uvc-gadget"
-rm -rf /tmp/uvc-gadget
-git clone https://github.com/kbingham/uvc-gadget /tmp/uvc-gadget
-cd /tmp/uvc-gadget
-meson setup build -Dwerror=false
-ninja -C build -j$(nproc) 2>&1 | tail -5
-sudo cp build/src/uvc-gadget /usr/local/bin/
-# Copy shared library if the build produced one (not all configs produce it)
-if [ -f build/lib/libuvcgadget.so.0.1.0 ]; then
-    sudo cp build/lib/libuvcgadget.so.0.1.0 /usr/local/lib/
-fi
-sudo ldconfig
-log "uvc-gadget installed"
+log "Installing camera stream script"
+curl -fsSL "${REPO}/firmware/pi-camera/scripts/camera-stream.py" \
+    | sudo tee /usr/local/bin/slitcam-camera-stream.py > /dev/null
+sudo chmod +x /usr/local/bin/slitcam-camera-stream.py
+log "camera-stream.py installed"
 
 # ── 4. slitcam-pi-camera binary (pre-built) ───────────────────────────────────
 
@@ -66,8 +55,10 @@ SLITCAM_GPIO_DIAG=22
 SLITCAM_STEP_DELAY_US=500
 SLITCAM_HOME_MAX_STEPS=10000
 SLITCAM_HOME_BACKOFF_STEPS=100
-SLITCAM_UVC_RESOLUTION=640x480
-SLITCAM_UVC_FRAMERATE=30
+SLITCAM_STREAM_PORT=8080
+SLITCAM_STREAM_WIDTH=640
+SLITCAM_STREAM_HEIGHT=480
+SLITCAM_STREAM_FPS=30
 SLITCAM_UART_DEVICE=/dev/serial0
 SLITCAM_SG_THRESHOLD=255
 EOF
